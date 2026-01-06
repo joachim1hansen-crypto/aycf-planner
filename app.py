@@ -7,36 +7,33 @@ import pandas as pd
 st.set_page_config(page_title="Wizz AYCF Planner", page_icon="✈️", layout="wide")
 st.title("💖 All You Can Fly: Connection Finder")
 
-# Sidebar
+# Sidebar - Includes fix for "latin-1" crash
 key_input = st.sidebar.text_input("Enter RapidAPI Key", type="password")
 RAPIDAPI_KEY = key_input.strip() if key_input else None
 RAPIDAPI_HOST = "aerodatabox.p.rapidapi.com"
 WIZZ_CODES = ['WZZ', 'WUK', 'WMT', 'WAZ', 'W6'] 
 
-# --- HELPER: ROBUST TIME FINDER ---
+# --- HELPER FUNCTIONS ---
 def get_time_string(f):
-    """Checks every possible place for the time."""
-    # 1. Movement Local
+    """Safely extracts time from multiple possible locations."""
+    # 1. Movement Local (Best)
     t = f.get('movement', {}).get('scheduledTimeLocal')
     if t: return t
     # 2. Movement UTC
     t = f.get('movement', {}).get('scheduledTimeUtc')
     if t: return t
-    # 3. Departure Local
+    # 3. Departure Local (Backup)
     t = f.get('departure', {}).get('scheduledTimeLocal')
-    if t: return t
-    # 4. Departure UTC
-    t = f.get('departure', {}).get('scheduledTimeUtc')
     if t: return t
     return None
 
 def parse_time(time_str):
-    """Safely converts string to datetime."""
+    """Converts API string to datetime object safely."""
     if not time_str: return None
     try:
-        # Take first 16 chars (2026-01-07T10:00)
-        clean = time_str[:16]
-        return datetime.strptime(clean, "%Y-%m-%dT%H:%M")
+        # Standard format: 2026-01-07T14:30+01:00 -> take first 16 chars
+        clean_str = time_str[:16]
+        return datetime.strptime(clean_str, "%Y-%m-%dT%H:%M")
     except:
         return None
 
@@ -68,7 +65,7 @@ def get_departures(airport_icao, start_time, end_time):
         return response.json().get('departures', [])
     except Exception as e:
         if "404" not in str(e):
-            st.warning(f"API Error: {e}")
+            st.error(f"API Error: {e}")
         return []
 
 def process_flights(raw_flights):
@@ -77,7 +74,7 @@ def process_flights(raw_flights):
         flight_num = f.get('number', 'Unknown')
         airline = f.get('airline', {}).get('name', '')
         
-        # Check if Wizz
+        # Filter for Wizz Air
         is_wizz = any(c in flight_num for c in WIZZ_CODES) or "Wizz" in airline
         
         if is_wizz:
@@ -90,7 +87,6 @@ def process_flights(raw_flights):
             
             if dep_dt:
                 formatted_dep = dep_dt.strftime("%H:%M")
-                # Est landing = Dep + 2h 30m
                 arr_dt = dep_dt + timedelta(hours=2, minutes=30)
             else:
                 formatted_dep = "Unknown"
@@ -102,7 +98,7 @@ def process_flights(raw_flights):
                 "To_ICAO": dest_icao,
                 "Depart": formatted_dep,
                 "Est_Arrival_Obj": arr_dt,
-                "Raw_Data": f # Keep raw data for debugging
+                "Raw_Data": f 
             })
     return cleaned
 
@@ -129,19 +125,19 @@ if st.button("Find Departures", type="primary"):
         flights = process_flights(raw)
         
     if not flights:
-        st.warning("No Wizz Air flights found.")
+        st.warning("No Wizz Air flights found (or API returned empty data).")
     else:
         st.session_state['leg1_flights'] = flights
         st.success(f"Found {len(flights)} flights!")
         
-        # --- DEBUG SECTION ---
-        # If the first flight has Unknown time, show why!
+        # --- DEBUG HELPER ---
+        # If time is unknown, this box will appear to help us fix it
         if flights and flights[0]['Depart'] == "Unknown":
-            st.error("⚠️ Time is missing! See Debug Data below:")
-            with st.expander("🛠️ RAW DATA (Send a screenshot of this!)", expanded=True):
+            st.error("⚠️ Time is missing! Please expand the box below and send a screenshot:")
+            with st.expander("🛠️ DEBUG RAW DATA", expanded=True):
                 st.json(flights[0]['Raw_Data'])
 
-# STEP 2: DISPLAY & CONNECT
+# STEP 2: DISPLAY
 if 'leg1_flights' in st.session_state:
     df = pd.DataFrame(st.session_state['leg1_flights'])
     st.dataframe(df[["Flight", "To", "Depart"]], use_container_width=True)
@@ -157,7 +153,7 @@ if 'leg1_flights' in st.session_state:
         choice = st.session_state['leg1_flights'][index]
         
         if choice['Depart'] == "Unknown":
-             st.error("Cannot plan connections: Time is Unknown (See Debug section above).")
+             st.error("Cannot plan: Time is Unknown. Check Debug Data above.")
         elif not choice['To_ICAO']:
              st.error("Cannot plan: Destination ICAO code missing.")
         else:
@@ -170,4 +166,14 @@ if 'leg1_flights' in st.session_state:
             s_str = min_connect.strftime("%Y-%m-%dT%H:%M")
             e_str = search_end.strftime("%Y-%m-%dT%H:%M")
             
-            st.info(f"Checking flights from {choice['To']} after {min_connect.strftime('%
+            st.info(f"Checking flights from {choice['To']} after {min_connect.strftime('%H:%M')}...")
+            
+            raw_conn = get_departures(hub_icao, s_str, e_str)
+            conn_flights = process_flights(raw_conn)
+            
+            if conn_flights:
+                st.balloons()
+                st.write(f"### 🎉 Valid Connections from {choice['To']}:")
+                st.dataframe(pd.DataFrame(conn_flights)[["Flight", "To", "Depart"]], use_container_width=True)
+            else:
+                st.warning("No connections found in the next 10 hours.")
