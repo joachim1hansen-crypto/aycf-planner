@@ -7,33 +7,44 @@ import pandas as pd
 st.set_page_config(page_title="Wizz AYCF Planner", page_icon="✈️", layout="wide")
 st.title("💖 All You Can Fly: Connection Finder")
 
-# Sidebar - Includes fix for "latin-1" crash
+# Sidebar
 key_input = st.sidebar.text_input("Enter RapidAPI Key", type="password")
 RAPIDAPI_KEY = key_input.strip() if key_input else None
 RAPIDAPI_HOST = "aerodatabox.p.rapidapi.com"
 WIZZ_CODES = ['WZZ', 'WUK', 'WMT', 'WAZ', 'W6'] 
 
-# --- HELPER FUNCTIONS ---
+# --- HELPER: FIX FOR YOUR SCREENSHOT ---
 def get_time_string(f):
-    """Safely extracts time from multiple possible locations."""
-    # 1. Movement Local (Best)
+    """
+    Extracts time from the specific structure shown in your screenshot:
+    departure -> scheduledTime -> local
+    """
+    # 1. Try Departure (Deep Nested) - This matches your screenshot!
+    t = f.get('departure', {}).get('scheduledTime', {}).get('local')
+    if t: return t
+    
+    # 2. Try Movement (Deep Nested)
+    t = f.get('movement', {}).get('scheduledTime', {}).get('local')
+    if t: return t
+
+    # 3. Old Backup (Flat structure)
     t = f.get('movement', {}).get('scheduledTimeLocal')
     if t: return t
-    # 2. Movement UTC
-    t = f.get('movement', {}).get('scheduledTimeUtc')
-    if t: return t
-    # 3. Departure Local (Backup)
-    t = f.get('departure', {}).get('scheduledTimeLocal')
-    if t: return t
+    
     return None
 
 def parse_time(time_str):
-    """Converts API string to datetime object safely."""
+    """
+    Handles the date format with a SPACE instead of T.
+    Example input: "2026-01-07 06:00+01:00"
+    """
     if not time_str: return None
     try:
-        # Standard format: 2026-01-07T14:30+01:00 -> take first 16 chars
+        # Take first 16 chars: "2026-01-07 06:00"
         clean_str = time_str[:16]
-        return datetime.strptime(clean_str, "%Y-%m-%dT%H:%M")
+        # Replace 'T' with space just in case, to handle both formats
+        clean_str = clean_str.replace("T", " ")
+        return datetime.strptime(clean_str, "%Y-%m-%d %H:%M")
     except:
         return None
 
@@ -81,7 +92,7 @@ def process_flights(raw_flights):
             dest_name = f.get('arrival', {}).get('airport', {}).get('name', 'Unknown')
             dest_icao = f.get('arrival', {}).get('airport', {}).get('icao', '')
             
-            # Find Time
+            # Find Time using the new function
             raw_time = get_time_string(f)
             dep_dt = parse_time(raw_time)
             
@@ -125,19 +136,12 @@ if st.button("Find Departures", type="primary"):
         flights = process_flights(raw)
         
     if not flights:
-        st.warning("No Wizz Air flights found (or API returned empty data).")
+        st.warning("No Wizz Air flights found.")
     else:
         st.session_state['leg1_flights'] = flights
         st.success(f"Found {len(flights)} flights!")
-        
-        # --- DEBUG HELPER ---
-        # If time is unknown, this box will appear to help us fix it
-        if flights and flights[0]['Depart'] == "Unknown":
-            st.error("⚠️ Time is missing! Please expand the box below and send a screenshot:")
-            with st.expander("🛠️ DEBUG RAW DATA", expanded=True):
-                st.json(flights[0]['Raw_Data'])
 
-# STEP 2: DISPLAY
+# STEP 2: DISPLAY & CONNECT
 if 'leg1_flights' in st.session_state:
     df = pd.DataFrame(st.session_state['leg1_flights'])
     st.dataframe(df[["Flight", "To", "Depart"]], use_container_width=True)
@@ -153,7 +157,7 @@ if 'leg1_flights' in st.session_state:
         choice = st.session_state['leg1_flights'][index]
         
         if choice['Depart'] == "Unknown":
-             st.error("Cannot plan: Time is Unknown. Check Debug Data above.")
+             st.error("Cannot plan: Time is Unknown.")
         elif not choice['To_ICAO']:
              st.error("Cannot plan: Destination ICAO code missing.")
         else:
