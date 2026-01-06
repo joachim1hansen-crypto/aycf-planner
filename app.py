@@ -19,7 +19,7 @@ st.title("💖 All You Can Fly: Connection Finder")
 st.caption("Finds flights within the 72h booking window with valid layovers.")
 
 # --- HELPER FUNCTIONS ---
-def def get_departures(airport_icao, date_from, date_to):
+def get_departures(airport_icao, date_from, date_to):
     """Fetches departures from a specific airport for a time window."""
     if not RAPIDAPI_KEY:
         st.error("Please enter your RapidAPI Key in the sidebar.")
