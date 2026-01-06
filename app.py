@@ -19,17 +19,25 @@ st.title("💖 All You Can Fly: Connection Finder")
 st.caption("Finds flights within the 72h booking window with valid layovers.")
 
 # --- HELPER FUNCTIONS ---
-def get_departures(airport_icao, date_from, date_to):
+def def get_departures(airport_icao, date_from, date_to):
     """Fetches departures from a specific airport for a time window."""
     if not RAPIDAPI_KEY:
         st.error("Please enter your RapidAPI Key in the sidebar.")
         return []
 
-    # AeroDataBox expects times in format: YYYY-MM-DDTHH:MM
-    # We split requests into 12-hour chunks because the free tier limits data size
-    url = f"https://aerodatabox.p.rapidapi.com/flights/air/departures/dates/{date_from}/{date_to}"
+    # --- THE FIX IS HERE ---
+    # We changed the URL to include '/airports/icao/{airport_icao}'
+    url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{airport_icao}/{date_from}/{date_to}"
     
-    querystring = {"withLeg":"true", "withCancelled":"false", "withCodeshared":"true", "withCargo":"false", "withPrivate":"false"}
+    querystring = {
+        "withLeg": "true",
+        "direction": "Departure",
+        "withCancelled": "false",
+        "withCodeshared": "true",
+        "withCargo": "false",
+        "withPrivate": "false"
+    }
+    
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
         "X-RapidAPI-Host": RAPIDAPI_HOST
@@ -37,11 +45,15 @@ def get_departures(airport_icao, date_from, date_to):
 
     try:
         response = requests.get(url, headers=headers, params=querystring)
+        response.raise_for_status() # Checks if the API returned an error (like 404)
         data = response.json()
+        
+        # The API returns 'departures' list directly
         return data.get('departures', [])
     except Exception as e:
         st.error(f"API Error: {e}")
         return []
+
 
 def filter_wizz(flights):
     """Filters a list of flights for only Wizz Air aircraft."""
